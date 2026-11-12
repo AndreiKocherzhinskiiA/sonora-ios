@@ -1,0 +1,9 @@
+version: 1
+bundleID: org.sonorahq.sonora
+infoPath: Config/Info.plist
+iconPath: Sonora/Assets.xcassets/AppIcon.appiconset/Sonora-1024.png
+resources:
+  - Sonora/Resources/Fonts/Inter-Regular.ttf
+  - Sonora/Resources/Fonts/Inter-Medium.ttf
+  - Sonora/Resources/Fonts/Inter-SemiBold.ttf
+  - Sonora/Resources/Fonts/Inter-Bold.ttf
