@@ -59,21 +59,41 @@ final class OfflineMusic {
         var seen = Set<Track.Source>()
         var result: [Track] = []
         for track in history {
-            guard case .youtube = track.source, seen.insert(track.source).inserted else { continue }
+            guard isDownloadable(track.source), seen.insert(track.source).inserted else { continue }
             result.append(track)
             if result.count == (limit ?? smartDownloadLimit) { break }
         }
         return result
     }
 
+    private func isDownloadable(_ source: Track.Source) -> Bool {
+        switch source {
+        case .youtube, .subsonic, .deezer: true
+        case .local, .stream: false
+        }
+    }
+
     /// Slider edits are drafts. Only this explicit action applies the new limit and starts work.
-    func startSmartDownloads(from history: [Track], using client: YouTubeClient) async {
+    func startSmartDownloads(
+        from history: [Track],
+        using client: YouTubeClient? = nil,
+        subsonic: SubsonicClient? = nil,
+        deezer: DeezerClient? = nil
+    ) async {
         guard smartDownloads else { return }
+        if let client { self.client = client }
+        if let subsonic { self.subsonicClient = subsonic }
+        if let deezer { self.deezerClient = deezer }
         appliedSmartDownloadLimit = smartDownloadLimit
         UserDefaults.standard.set(appliedSmartDownloadLimit, forKey: "appliedSmartDownloadLimit")
         smartDownloadsRunning = true
-        await download(smartTracks(from: history, limit: appliedSmartDownloadLimit), using: client)
-        resume(using: client)
+        await download(
+            smartTracks(from: history, limit: appliedSmartDownloadLimit),
+            using: client,
+            subsonic: subsonic,
+            deezer: deezer
+        )
+        resume(using: client, subsonic: subsonic, deezer: deezer)
     }
 
     /// Cancels active/queued work and future smart refills until Start downloads is pressed again.
@@ -100,7 +120,17 @@ final class OfflineMusic {
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private weak var client: YouTubeClient?
+    @ObservationIgnored private weak var subsonicClient: SubsonicClient?
+    @ObservationIgnored private weak var deezerClient: DeezerClient?
     @ObservationIgnored private var waitingForConnection = false
+
+    func setSubsonic(_ client: SubsonicClient?) {
+        self.subsonicClient = client
+    }
+
+    func setDeezer(_ client: DeezerClient?) {
+        self.deezerClient = client
+    }
     #if canImport(Network)
     @ObservationIgnored private let network = NWPathMonitor()
     #endif
@@ -143,8 +173,8 @@ final class OfflineMusic {
         if !isConnected, worker != nil {
             pause()
             waitingForConnection = true
-        } else if isConnected, waitingForConnection, let client {
-            resume(using: client)
+        } else if isConnected, waitingForConnection, client != nil || subsonicClient != nil || deezerClient != nil {
+            resume(using: client, subsonic: subsonicClient, deezer: deezerClient)
         }
     }
 
@@ -153,7 +183,7 @@ final class OfflineMusic {
         do {
             var recovered = tracks
             for track in songs where !recovered.contains(where: { $0.source == track.source }) {
-                guard case .youtube = track.source, size(of: file(for: track)) > 0 else { continue }
+                guard isDownloadable(track.source), size(of: file(for: track)) > 0 else { continue }
                 recovered.append(track)
             }
             guard recovered.count != tracks.count else { return }
@@ -181,16 +211,24 @@ final class OfflineMusic {
     func job(for track: Track) -> Job? { jobs.first { $0.track.source == track.source } }
 
     /// Enqueues work independently of the presenting view or smart-history task's lifetime.
-    func download(_ songs: [Track], using client: YouTubeClient) async {
+    func download(
+        _ songs: [Track],
+        using client: YouTubeClient? = nil,
+        subsonic: SubsonicClient? = nil,
+        deezer: DeezerClient? = nil
+    ) async {
+        if let client { self.client = client }
+        if let subsonic { self.subsonicClient = subsonic }
+        if let deezer { self.deezerClient = deezer }
         do {
             try prepareFolder()
             recover(songs)
             for track in songs {
-                guard case .youtube = track.source, localURL(for: track) == nil, job(for: track) == nil else { continue }
+                guard isDownloadable(track.source), localURL(for: track) == nil, job(for: track) == nil else { continue }
                 jobs.append(Job(track: track))
             }
             try saveJobs()
-            if !isPaused { resume(using: client) }
+            if !isPaused { resume(using: self.client, subsonic: self.subsonicClient, deezer: self.deezerClient) }
         } catch { failure = error.localizedDescription }
     }
 
@@ -204,8 +242,14 @@ final class OfflineMusic {
         isPaused = !jobs.isEmpty
     }
 
-    func resume(using client: YouTubeClient) {
-        self.client = client
+    func resume(
+        using client: YouTubeClient? = nil,
+        subsonic: SubsonicClient? = nil,
+        deezer: DeezerClient? = nil
+    ) {
+        if let client { self.client = client }
+        if let subsonic { self.subsonicClient = subsonic }
+        if let deezer { self.deezerClient = deezer }
         guard worker == nil, !jobs.isEmpty else { return }
         guard isConnected else {
             waitingForConnection = true
@@ -229,7 +273,7 @@ final class OfflineMusic {
                 let job = self.jobs[0]
                 self.downloading = [job.track.source]
                 do {
-                    try await self.transfer(job, using: client)
+                    try await self.transfer(job)
                     try Task.checkCancellation()
                 } catch {
                     guard self.generation == token else { return }
@@ -249,29 +293,65 @@ final class OfflineMusic {
     }
 
     /// Re-resolves expiring URLs and appends only a matching byte range of the same audio format.
-    private func transfer(_ job: Job, using client: YouTubeClient) async throws {
-        guard case .youtube(let id) = job.track.source else { return }
+    private func transfer(_ job: Job) async throws {
         let partial = part(for: job.track)
         var offset = size(of: partial)
         if let total = job.total, offset == total {
             try finish(job)
             return
         }
-        let stream = try await client.stream(for: id)
-        try Task.checkCancellation()
-        let query = URLComponents(url: stream.url, resolvingAgainstBaseURL: false)?.queryItems
-        let format = query?.first { $0.name == "itag" }?.value
-        let expectedLength = stream.contentLength ?? query?.first { $0.name == "clen" }?.value.flatMap(Int64.init)
+
+        let streamURL: URL
+        let userAgent: String?
+        let expectedLength: Int64?
+        let format: String?
+        let deezerKey: [UInt8]?
+
+        switch job.track.source {
+        case .youtube(let id):
+            guard let client else { throw YouTubeError.signedOut }
+            let stream = try await client.stream(for: id)
+            try Task.checkCancellation()
+            let query = URLComponents(url: stream.url, resolvingAgainstBaseURL: false)?.queryItems
+            format = query?.first { $0.name == "itag" }?.value
+            expectedLength = stream.contentLength ?? query?.first { $0.name == "clen" }?.value.flatMap(Int64.init)
+            streamURL = stream.url
+            userAgent = stream.userAgent
+            deezerKey = nil
+        case .subsonic(let id):
+            guard let subsonicClient, let url = subsonicClient.streamURL(for: id) else {
+                throw SubsonicError.signedOut
+            }
+            streamURL = url
+            userAgent = nil
+            expectedLength = nil
+            format = "subsonic"
+            deezerKey = nil
+        case .deezer(let id):
+            guard let deezerClient else { throw DeezerError.signedOut }
+            let stream = try await deezerClient.resolveStream(for: id)
+            try Task.checkCancellation()
+            streamURL = stream.url
+            userAgent = nil
+            expectedLength = nil
+            format = "deezer-\(stream.format)"
+            deezerKey = stream.key
+        case .local, .stream:
+            return
+        }
+
         if job.received > 0, job.format != format {
             throw DownloadError.changed
         }
         while !Task.isCancelled {
-            var request = URLRequest(url: stream.url, timeoutInterval: 30)
+            var request = URLRequest(url: streamURL, timeoutInterval: 30)
             request.setValue("bytes=\(offset)-\(offset + 131_071)", forHTTPHeaderField: "Range")
             request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-            request.setValue(stream.userAgent, forHTTPHeaderField: "User-Agent")
-            request.setValue("https://www.youtube.com", forHTTPHeaderField: "Origin")
-            request.setValue("https://www.youtube.com/", forHTTPHeaderField: "Referer")
+            if let userAgent {
+                request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+                request.setValue("https://www.youtube.com", forHTTPHeaderField: "Origin")
+                request.setValue("https://www.youtube.com/", forHTTPHeaderField: "Referer")
+            }
             let (data, response) = try await URLSession.shared.data(for: request)
             try Task.checkCancellation()
             guard let http = response as? HTTPURLResponse, !data.isEmpty else { throw YouTubeError.refused }
@@ -296,19 +376,37 @@ final class OfflineMusic {
             if let expectedLength, expectedLength != total { throw DownloadError.changed }
             if let expected = jobs.first?.total, expected != total { throw DownloadError.changed }
             guard offset + Int64(data.count) <= total else { throw DownloadError.invalidRange }
+            let outputData: Data
+            if let deezerKey {
+                let rawChunk: Data
+                if offset + Int64(data.count) < total, data.count % DeezerDecrypt.blockSize != 0 {
+                    let aligned = (data.count / DeezerDecrypt.blockSize) * DeezerDecrypt.blockSize
+                    guard aligned > 0 else { throw DownloadError.invalidRange }
+                    rawChunk = data.prefix(aligned)
+                } else {
+                    rawChunk = data
+                }
+                outputData = DeezerDecrypt.decrypt(
+                    rawChunk,
+                    startingAtBlock: offset / Int64(DeezerDecrypt.blockSize),
+                    key: deezerKey
+                )
+            } else {
+                outputData = data
+            }
             guard let current = jobs.firstIndex(where: { $0.id == job.id }) else { return }
             jobs[current].total = total
             jobs[current].format = format
             try saveJobs()
-            if offset == 0 { try data.write(to: partial, options: .atomic) }
+            if offset == 0 { try outputData.write(to: partial, options: .atomic) }
             else {
                 let handle = try FileHandle(forWritingTo: partial)
                 defer { try? handle.close() }
                 try handle.seekToEnd()
-                try handle.write(contentsOf: data)
+                try handle.write(contentsOf: outputData)
                 try handle.synchronize()
             }
-            offset += Int64(data.count)
+            offset += Int64(outputData.count)
             guard let index = jobs.firstIndex(where: { $0.id == job.id }) else { return }
             jobs[index].received = offset
             jobs[index].total = total

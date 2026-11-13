@@ -4,6 +4,8 @@ import SwiftUI
 struct TrackSheet: View {
     @Environment(YouTubeSession.self) private var youtube
     @Environment(YouTubeFeed.self) private var feed
+    @Environment(DeezerSession.self) private var deezer
+    @Environment(DeezerFeed.self) private var deezerFeed
     @Environment(Toasts.self) private var toasts
     @Environment(\.dismiss) private var dismiss
 
@@ -13,6 +15,10 @@ struct TrackSheet: View {
 
     private var videoID: String? {
         if case .youtube(let id) = track.source { id } else { nil }
+    }
+
+    private var deezerID: String? {
+        if case .deezer(let id) = track.source { id } else { nil }
     }
 
     var body: some View {
@@ -49,6 +55,9 @@ struct TrackSheet: View {
             if feed.playlists.isEmpty, let client = youtube.client {
                 await feed.loadPlaylists(using: client)
             }
+            if deezerFeed.playlists.isEmpty, let client = deezer.client {
+                await deezerFeed.loadPlaylists(using: client)
+            }
         }
     }
 
@@ -75,6 +84,26 @@ struct TrackSheet: View {
                     Label(playlist.title, systemImage: "music.note.list")
                 }
             }
+        } else if let deezerID, let client = deezer.client {
+            ForEach(deezerFeed.playlists) { playlist in
+                Button {
+                    dismiss()
+                    let toasts = toasts
+                    Task { @MainActor in
+                        do {
+                            try await client.add(deezerID, toPlaylist: playlist.id)
+                            toasts.post(Toast(.done, String(localized: "Added to \(playlist.title)")))
+                        } catch {
+                            toasts.post(
+                                Toast(.failed, String(localized: "Could not add that to \(playlist.title)"))
+                                    .detail(error.localizedDescription)
+                            )
+                        }
+                    }
+                } label: {
+                    Label(playlist.title, systemImage: "music.note.list")
+                }
+            }
         }
     }
 }
@@ -85,7 +114,10 @@ struct TrackActions: View {
     @Environment(OfflineMusic.self) private var offline
     @Environment(PlaybackController.self) private var playback
     @Environment(YouTubeSession.self) private var youtube
+    @Environment(SubsonicSession.self) private var subsonic
+    @Environment(DeezerSession.self) private var deezer
     @Environment(YouTubeFeed.self) private var feed
+    @Environment(DeezerFeed.self) private var deezerFeed
     @Environment(Toasts.self) private var toasts
     @Environment(Router.self) private var router
 
@@ -98,6 +130,20 @@ struct TrackActions: View {
 
     private var videoID: String? {
         if case .youtube(let id) = track.source { id } else { nil }
+    }
+
+    private var deezerID: String? {
+        if case .deezer(let id) = track.source { id } else { nil }
+    }
+
+    private var isSubsonic: Bool {
+        if case .subsonic = track.source { true } else { false }
+    }
+
+    private var canDownload: Bool {
+        (videoID != nil && youtube.client != nil)
+            || (isSubsonic && subsonic.client != nil)
+            || (deezerID != nil && deezer.client != nil)
     }
 
     var body: some View {
@@ -121,14 +167,16 @@ struct TrackActions: View {
                 Label("Remove download", systemImage: "trash")
             }
         }
-        if videoID != nil, let client = youtube.client {
+        if canDownload {
             Button {
                 done()
-                Task { await offline.download([track], using: client) }
+                Task { await offline.download([track], using: youtube.client, subsonic: subsonic.client, deezer: deezer.client) }
             } label: {
                 Label(offline.localURL(for: track) != nil ? "Downloaded" : offline.job(for: track) != nil ? "Queued for download" : "Download", systemImage: "arrow.down.circle")
             }
             .disabled(offline.localURL(for: track) != nil || offline.job(for: track) != nil)
+        }
+        if videoID != nil, let client = youtube.client {
             Button {
                 done()
                 let toasts = toasts
@@ -139,15 +187,39 @@ struct TrackActions: View {
             } label: {
                 Label("Start radio", systemImage: "dot.radiowaves.left.and.right")
             }
+        } else if deezerID != nil, let client = deezer.client {
+            Button {
+                done()
+                let toasts = toasts
+                Task { @MainActor in
+                    do { try await playback.startDeezerRadio(for: track, using: client) }
+                    catch { toasts.post(Toast(.failed, String(localized: "Could not start radio")).detail(error.localizedDescription)) }
+                }
+            } label: {
+                Label("Start radio", systemImage: "dot.radiowaves.left.and.right")
+            }
         }
         if let artist = track.artistReferences.first(where: { $0.id != nil }), let artistID = artist.id {
-            Button { open(.artist(id: artistID, name: artist.name)) } label: {
+            Button {
+                let target: YouTubeDestination = isSubsonic
+                    ? .subsonicArtist(id: artistID, name: artist.name)
+                    : deezerID != nil
+                        ? .deezerArtist(id: artistID, name: artist.name)
+                        : .artist(id: artistID, name: artist.name)
+                open(target)
+            } label: {
                 Label("Go to artist", systemImage: "person.crop.circle")
             }
         }
         if let albumID = track.albumID {
             Button {
-                open(.album(Album(id: albumID, title: track.album, artists: track.artists, artworkURL: track.artworkURL, year: 0, trackCount: 0)))
+                let album = Album(id: albumID, title: track.album, artists: track.artists, artworkURL: track.artworkURL, year: 0, trackCount: 0)
+                let target: YouTubeDestination = isSubsonic
+                    ? .subsonicAlbum(album)
+                    : deezerID != nil
+                        ? .deezerAlbum(album)
+                        : .album(album)
+                open(target)
             } label: {
                 Label("Go to album", systemImage: "square.stack")
             }
@@ -177,6 +249,38 @@ struct TrackActions: View {
                             Button(playlist.title) {
                                 change(String(localized: "Added to \(playlist.title)"), String(localized: "Could not add that to \(playlist.title)")) {
                                     try await client.add(videoID, toPlaylist: playlist.id)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Add to playlist", systemImage: "text.badge.plus")
+                    }
+                }
+            }
+        } else if let deezerID, let client = deezer.client {
+            Button {
+                change(String(localized: "Added to Favorites"), String(localized: "Could not add that to Favorites")) {
+                    try await client.setTrackSaved(deezerID, saved: true)
+                }
+            } label: {
+                Label("Add to Favorites", systemImage: "heart")
+            }
+            Button {
+                change(String(localized: "Removed from Favorites"), String(localized: "Could not remove that from Favorites")) {
+                    try await client.setTrackSaved(deezerID, saved: false)
+                }
+            } label: {
+                Label("Remove from Favorites", systemImage: "heart.slash")
+            }
+            if choosePlaylist != nil || !deezerFeed.playlists.isEmpty {
+                if let choosePlaylist {
+                    Button(action: choosePlaylist) { Label("Add to playlist", systemImage: "text.badge.plus") }
+                } else {
+                    Menu {
+                        ForEach(deezerFeed.playlists) { playlist in
+                            Button(playlist.title) {
+                                change(String(localized: "Added to \(playlist.title)"), String(localized: "Could not add that to \(playlist.title)")) {
+                                    try await client.add(deezerID, toPlaylist: playlist.id)
                                 }
                             }
                         }

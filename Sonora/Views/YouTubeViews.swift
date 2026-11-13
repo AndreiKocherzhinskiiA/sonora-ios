@@ -43,6 +43,26 @@ struct YouTubeShelfView: View {
                 ShelfCard(artwork: album.artworkURL, title: album.title, subtitle: album.artists)
             }
             .buttonStyle(.plain)
+        case .subsonicPlaylist(let playlist):
+            NavigationLink(value: YouTubeDestination.subsonicPlaylist(playlist)) {
+                ShelfCard(artwork: playlist.artworkURL, title: playlist.title, subtitle: playlist.owner)
+            }
+            .buttonStyle(.plain)
+        case .subsonicAlbum(let album):
+            NavigationLink(value: YouTubeDestination.subsonicAlbum(album)) {
+                ShelfCard(artwork: album.artworkURL, title: album.title, subtitle: album.artists)
+            }
+            .buttonStyle(.plain)
+        case .deezerPlaylist(let playlist):
+            NavigationLink(value: YouTubeDestination.deezerPlaylist(playlist)) {
+                ShelfCard(artwork: playlist.artworkURL, title: playlist.title, subtitle: playlist.owner)
+            }
+            .buttonStyle(.plain)
+        case .deezerAlbum(let album):
+            NavigationLink(value: YouTubeDestination.deezerAlbum(album)) {
+                ShelfCard(artwork: album.artworkURL, title: album.title, subtitle: album.artists)
+            }
+            .buttonStyle(.plain)
         }
     }
 }
@@ -77,14 +97,13 @@ private struct ShelfCard: View {
 /// A playlist or album: its songs, loaded when the page opens, with a Play button.
 struct YouTubeCollectionView: View {
     @Environment(OfflineMusic.self) private var offline
-    @Environment(YouTubeSession.self) private var youtube
     @Environment(PlaybackController.self) private var playback
     @Environment(Toasts.self) private var toasts
 
     let title: String
     let subtitle: String
     let artwork: URL?
-    let load: (YouTubeClient) async throws -> [Track]
+    let load: () async throws -> [Track]
 
     @State private var tracks: [Track] = []
     @State private var isLoading = true
@@ -140,10 +159,9 @@ struct YouTubeCollectionView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            guard let client = youtube.client else { return }
             defer { isLoading = false }
             do {
-                tracks = try await load(client)
+                tracks = try await load()
             } catch is CancellationError {
                 return
             } catch {

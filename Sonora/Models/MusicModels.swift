@@ -11,6 +11,10 @@ struct Track: Codable, Hashable, Identifiable, Sendable {
         case stream(URL)
         /// A YouTube Music video id, resolved to a stream when the track plays.
         case youtube(String)
+        /// A Subsonic / Navidrome song id, resolved to a stream URL via the active server.
+        case subsonic(String)
+        /// A Deezer track id, resolved to an encrypted stream via the active session.
+        case deezer(String)
     }
 
     var id: UUID
@@ -63,8 +67,15 @@ struct Track: Codable, Hashable, Identifiable, Sendable {
 
     var sourceURL: URL {
         switch source {
-        case .local(let url), .stream(let url): url
-        case .youtube(let id): URL(string: "https://music.youtube.com/watch?v=\(id)")!
+        case .local(let url), .stream(let url):
+            return url
+        case .youtube(let id):
+            return URL(string: "https://music.youtube.com/watch?v=\(id)")!
+        case .subsonic(let id):
+            let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+            return URL(string: "subsonic://track/\(encoded)")!
+        case .deezer(let id):
+            return URL(string: "https://www.deezer.com/track/\(id)")!
         }
     }
 

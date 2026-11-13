@@ -9,9 +9,15 @@ struct LibraryView: View {
     @Environment(Toasts.self) private var toasts
     @Environment(YouTubeSession.self) private var youtube
     @Environment(YouTubeFeed.self) private var feed
+    @Environment(SubsonicSession.self) private var subsonic
+    @Environment(SubsonicFeed.self) private var subsonicFeed
+    @Environment(DeezerSession.self) private var deezer
+    @Environment(DeezerFeed.self) private var deezerFeed
     @State private var showsImporter = false
 
     private var showsYouTube: Bool { youtube.isSignedIn }
+    private var showsSubsonic: Bool { subsonic.isSignedIn }
+    private var showsDeezer: Bool { deezer.isSignedIn }
 
     var body: some View {
         Page("Your Library") {
@@ -22,7 +28,7 @@ struct LibraryView: View {
             .disabled(library.isImporting)
             .accessibilityLabel("Import")
         } content: {
-            if library.tracks.isEmpty && !showsYouTube && offline.tracks.isEmpty && offline.jobs.isEmpty {
+            if library.tracks.isEmpty && !showsYouTube && !showsSubsonic && !showsDeezer && offline.tracks.isEmpty && offline.jobs.isEmpty {
                 Vacancy(
                     icon: "file-music",
                     title: "No songs yet",
@@ -85,6 +91,80 @@ struct LibraryView: View {
                                 .textCase(nil)
                         }
                         .listSectionSeparator(.hidden)
+                    }
+                    if showsSubsonic {
+                        if !subsonicFeed.albums.isEmpty {
+                            Section {
+                                ForEach(subsonicFeed.albums) { album in
+                                    LibraryLink(artwork: album.artworkURL, title: album.title, subtitle: album.artists, destination: .subsonicAlbum(album))
+                                }
+                            } header: {
+                                Eyebrow("Subsonic albums").padding(.horizontal, Theme.inset).padding(.vertical, 8).textCase(nil)
+                            }
+                            .listSectionSeparator(.hidden)
+                        }
+                        if !subsonicFeed.artists.isEmpty {
+                            Section {
+                                ForEach(subsonicFeed.artists) { artist in
+                                    LibraryLink(artwork: artist.artworkURL, title: artist.name, subtitle: "", destination: .subsonicArtist(id: artist.id, name: artist.name), round: true)
+                                }
+                            } header: {
+                                Eyebrow("Subsonic artists").padding(.horizontal, Theme.inset).padding(.vertical, 8).textCase(nil)
+                            }
+                            .listSectionSeparator(.hidden)
+                        }
+                        if !subsonicFeed.playlists.isEmpty {
+                            Section {
+                                ForEach(subsonicFeed.playlists) { playlist in
+                                    LibraryLink(
+                                        artwork: playlist.artworkURL,
+                                        title: playlist.title,
+                                        subtitle: playlist.owner,
+                                        destination: .subsonicPlaylist(playlist)
+                                    )
+                                }
+                            } header: {
+                                Eyebrow("Subsonic playlists").padding(.horizontal, Theme.inset).padding(.vertical, 8).textCase(nil)
+                            }
+                            .listSectionSeparator(.hidden)
+                        }
+                    }
+                    if showsDeezer {
+                        if !deezerFeed.albums.isEmpty {
+                            Section {
+                                ForEach(deezerFeed.albums) { album in
+                                    LibraryLink(artwork: album.artworkURL, title: album.title, subtitle: album.artists, destination: .deezerAlbum(album))
+                                }
+                            } header: {
+                                Eyebrow("Deezer albums").padding(.horizontal, Theme.inset).padding(.vertical, 8).textCase(nil)
+                            }
+                            .listSectionSeparator(.hidden)
+                        }
+                        if !deezerFeed.artists.isEmpty {
+                            Section {
+                                ForEach(deezerFeed.artists) { artist in
+                                    LibraryLink(artwork: artist.artworkURL, title: artist.name, subtitle: "", destination: .deezerArtist(id: artist.id, name: artist.name), round: true)
+                                }
+                            } header: {
+                                Eyebrow("Deezer artists").padding(.horizontal, Theme.inset).padding(.vertical, 8).textCase(nil)
+                            }
+                            .listSectionSeparator(.hidden)
+                        }
+                        if !deezerFeed.playlists.isEmpty {
+                            Section {
+                                ForEach(deezerFeed.playlists) { playlist in
+                                    LibraryLink(
+                                        artwork: playlist.artworkURL,
+                                        title: playlist.title,
+                                        subtitle: playlist.owner,
+                                        destination: .deezerPlaylist(playlist)
+                                    )
+                                }
+                            } header: {
+                                Eyebrow("Deezer playlists").padding(.horizontal, Theme.inset).padding(.vertical, 8).textCase(nil)
+                            }
+                            .listSectionSeparator(.hidden)
+                        }
                     }
                     if !library.tracks.isEmpty {
                     Section {

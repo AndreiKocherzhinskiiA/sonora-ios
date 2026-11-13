@@ -1,16 +1,24 @@
 import Foundation
 
-/// A card on a YouTube Music shelf, by where it leads.
+/// A card on a home shelf, by where it leads.
 enum YouTubeItem: Identifiable {
     case track(Track)
     case playlist(Playlist)
     case album(Album)
+    case subsonicPlaylist(Playlist)
+    case subsonicAlbum(Album)
+    case deezerPlaylist(Playlist)
+    case deezerAlbum(Album)
 
     var id: String {
         switch self {
         case .track(let track): "track-\(track.id)"
         case .playlist(let playlist): "playlist-\(playlist.id)"
         case .album(let album): "album-\(album.id)"
+        case .subsonicPlaylist(let playlist): "subsonic-playlist-\(playlist.id)"
+        case .subsonicAlbum(let album): "subsonic-album-\(album.id)"
+        case .deezerPlaylist(let playlist): "deezer-playlist-\(playlist.id)"
+        case .deezerAlbum(let album): "deezer-album-\(album.id)"
         }
     }
 }
@@ -53,5 +61,11 @@ enum YouTubeDestination: Hashable {
     case artist(id: String, name: String)
     case playlist(Playlist)
     case album(Album)
+    case subsonicArtist(id: String, name: String)
+    case subsonicPlaylist(Playlist)
+    case subsonicAlbum(Album)
+    case deezerArtist(id: String, name: String)
+    case deezerPlaylist(Playlist)
+    case deezerAlbum(Album)
     case history
 }

@@ -34,6 +34,10 @@ struct RootView: View {
     @Environment(Toasts.self) private var toasts
     @Environment(YouTubeSession.self) private var youtube
     @Environment(YouTubeFeed.self) private var feed
+    @Environment(SubsonicSession.self) private var subsonic
+    @Environment(SubsonicFeed.self) private var subsonicFeed
+    @Environment(DeezerSession.self) private var deezer
+    @Environment(DeezerFeed.self) private var deezerFeed
     @Environment(Router.self) private var router
     @Environment(\.colorScheme) private var colorScheme
     @State private var selection: Tab = .home
@@ -89,10 +93,32 @@ struct RootView: View {
                 toasts.post(Toast(.failed, String(localized: "Could not load YouTube Music")).detail(failure))
             }
         }
-        .task(id: "\(offline.smartDownloads)-\(offline.smartDownloadsRunning)-\(offline.appliedSmartDownloadLimit)-\(youtube.isSignedIn)-\(history.tracks.first?.id.uuidString ?? "")") {
-            guard offline.smartDownloads, offline.smartDownloadsRunning, let client = youtube.client else { return }
+        .task(id: "\(subsonic.isSignedIn)-\(offline.isConnected)") {
+            offline.setSubsonic(subsonic.client)
+            guard offline.isConnected || !subsonic.isSignedIn else { return }
+            await subsonicFeed.refresh(using: subsonic.client)
+            if let failure = subsonicFeed.failure {
+                toasts.post(Toast(.failed, String(localized: "Could not load Subsonic")).detail(failure))
+            }
+        }
+        .task(id: "\(deezer.isSignedIn)-\(offline.isConnected)") {
+            offline.setDeezer(deezer.client)
+            guard offline.isConnected || !deezer.isSignedIn else { return }
+            await deezerFeed.refresh(using: deezer.client)
+            if let failure = deezerFeed.failure {
+                toasts.post(Toast(.failed, String(localized: "Could not load Deezer")).detail(failure))
+            }
+        }
+        .task(id: "\(offline.smartDownloads)-\(offline.smartDownloadsRunning)-\(offline.appliedSmartDownloadLimit)-\(youtube.isSignedIn)-\(subsonic.isSignedIn)-\(deezer.isSignedIn)-\(history.tracks.first?.id.uuidString ?? "")") {
+            guard offline.smartDownloads, offline.smartDownloadsRunning,
+                  youtube.client != nil || subsonic.client != nil || deezer.client != nil else { return }
             guard !Task.isCancelled else { return }
-            await offline.download(offline.smartTracks(from: history.tracks, limit: offline.appliedSmartDownloadLimit), using: client)
+            await offline.download(
+                offline.smartTracks(from: history.tracks, limit: offline.appliedSmartDownloadLimit),
+                using: youtube.client,
+                subsonic: subsonic.client,
+                deezer: deezer.client
+            )
         }
         .onChange(of: offline.failure) {
             if let failure = offline.failure {

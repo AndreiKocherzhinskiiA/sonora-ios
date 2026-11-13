@@ -30,8 +30,11 @@ final class PlaybackController {
     @ObservationIgnored private var progressTask: Task<Void, Never>?
     @ObservationIgnored private weak var library: LocalLibrary?
     @ObservationIgnored private weak var youtube: YouTubeSession?
+    @ObservationIgnored private weak var subsonic: SubsonicSession?
+    @ObservationIgnored private weak var deezer: DeezerSession?
     @ObservationIgnored private weak var history: PlayHistory?
     @ObservationIgnored private var resolving: Task<Void, Never>?
+    @ObservationIgnored private var deezerLoader: DeezerResourceLoader?
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var lengthTask: Task<Void, Never>?
     @ObservationIgnored private var artwork: UIImage?
@@ -116,6 +119,24 @@ final class PlaybackController {
 
     func setYouTube(_ youtube: YouTubeSession) {
         self.youtube = youtube
+    }
+
+    func setSubsonic(_ subsonic: SubsonicSession) {
+        self.subsonic = subsonic
+    }
+
+    func setDeezer(_ deezer: DeezerSession) {
+        self.deezer = deezer
+    }
+
+    func startDeezerRadio(for track: Track, using client: DeezerClient) async throws {
+        guard case .deezer(let id) = track.source else { return }
+        let tracks = try await client.radio(for: id)
+        guard let first = tracks.first else { return }
+        isStartingRadio = true
+        play(first, from: tracks)
+        isStartingRadio = false
+        radioToken = nil
     }
 
     func play(_ track: Track, from tracks: [Track]? = nil) {
@@ -219,6 +240,7 @@ final class PlaybackController {
         stalledSince = nil
         progressTask?.cancel()
         resolving?.cancel()
+        deezerLoader = nil
         state = .loading
         position = 0
         duration = track.duration
@@ -255,6 +277,35 @@ final class PlaybackController {
                 } catch {
                     guard self.currentTrack?.id == track.id else { return }
                     self.logger.error("cannot play the youtube track: \(error.localizedDescription, privacy: .public)")
+                    self.state = .failed(error.localizedDescription)
+                }
+            }
+        case .subsonic(let songID):
+            deezerLoader = nil
+            guard let url = subsonic?.client?.streamURL(for: songID) else {
+                state = .failed(SubsonicError.signedOut.localizedDescription)
+                return
+            }
+            start(AVPlayerItem(url: url))
+        case .deezer(let trackID):
+            player.pause()
+            resolving = Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    guard let client = self.deezer?.client else { throw DeezerError.signedOut }
+                    let stream = try await client.resolveStream(for: trackID)
+                    guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
+                    let loader = DeezerResourceLoader(stream: stream)
+                    self.deezerLoader = loader
+                    let asset = AVURLAsset(url: DeezerResourceLoader.assetURL(for: stream.trackID))
+                    asset.resourceLoader.setDelegate(loader, queue: loader.queue)
+                    if self.duration <= 0, let length = stream.duration, length > 0 { self.duration = length }
+                    self.start(AVPlayerItem(asset: asset))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard self.currentTrack?.id == track.id else { return }
+                    self.logger.error("cannot play the deezer track: \(error.localizedDescription, privacy: .public)")
                     self.state = .failed(error.localizedDescription)
                 }
             }
@@ -353,6 +404,7 @@ final class PlaybackController {
         state = .idle
         progressTask?.cancel()
         resolving?.cancel()
+        deezerLoader = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 

@@ -21,11 +21,21 @@ struct SearchView: View {
     @Environment(LocalLibrary.self) private var library
     @Environment(PlaybackController.self) private var playback
     @Environment(YouTubeSession.self) private var youtube
+    @Environment(SubsonicSession.self) private var subsonic
+    @Environment(DeezerSession.self) private var deezer
     @Environment(Toasts.self) private var toasts
     @State private var songs: [Track] = []
     @State private var albums: [Album] = []
     @State private var artists: [SavedArtist] = []
     @State private var playlists: [Playlist] = []
+    @State private var subsonicSongs: [Track] = []
+    @State private var subsonicAlbums: [Album] = []
+    @State private var subsonicArtists: [SavedArtist] = []
+    @State private var subsonicPlaylists: [Playlist] = []
+    @State private var deezerSongs: [Track] = []
+    @State private var deezerAlbums: [Album] = []
+    @State private var deezerArtists: [SavedArtist] = []
+    @State private var deezerPlaylists: [Playlist] = []
     @State private var isSearchingRemote = false
     @State private var scope: Scope = .songs
     @State private var query = ""
@@ -40,16 +50,16 @@ struct SearchView: View {
         }
     }
 
-    private var hasRemote: Bool { youtube.isSignedIn && !query.isEmpty }
+    private var hasRemote: Bool { (youtube.isSignedIn || subsonic.isSignedIn || deezer.isSignedIn) && !query.isEmpty }
 
     private var isEmpty: Bool {
         guard !query.isEmpty, !isSearchingRemote else { return false }
         switch (hasRemote, scope) {
         case (false, _): return local.isEmpty
-        case (true, .songs): return local.isEmpty && songs.isEmpty
-        case (true, .albums): return albums.isEmpty
-        case (true, .artists): return artists.isEmpty
-        case (true, .playlists): return playlists.isEmpty
+        case (true, .songs): return local.isEmpty && songs.isEmpty && subsonicSongs.isEmpty && deezerSongs.isEmpty
+        case (true, .albums): return albums.isEmpty && subsonicAlbums.isEmpty && deezerAlbums.isEmpty
+        case (true, .artists): return artists.isEmpty && subsonicArtists.isEmpty && deezerArtists.isEmpty
+        case (true, .playlists): return playlists.isEmpty && subsonicPlaylists.isEmpty && deezerPlaylists.isEmpty
         }
     }
 
@@ -104,6 +114,24 @@ struct SearchView: View {
                 ForEach(songs) { track in
                     TrackRow(track: track) { playback.play(track, from: songs) }
                 }
+                if !subsonicSongs.isEmpty {
+                    Eyebrow("Subsonic")
+                        .padding(.horizontal, Theme.inset)
+                        .padding(.top, 16)
+                        .padding(.bottom, 8)
+                }
+                ForEach(subsonicSongs) { track in
+                    TrackRow(track: track) { playback.play(track, from: subsonicSongs) }
+                }
+                if !deezerSongs.isEmpty {
+                    Eyebrow("Deezer")
+                        .padding(.horizontal, Theme.inset)
+                        .padding(.top, 16)
+                        .padding(.bottom, 8)
+                }
+                ForEach(deezerSongs) { track in
+                    TrackRow(track: track) { playback.play(track, from: deezerSongs) }
+                }
             case .albums:
                 ForEach(albums) { album in
                     ResultRow(
@@ -113,6 +141,22 @@ struct SearchView: View {
                         destination: .album(album)
                     )
                 }
+                ForEach(deezerAlbums) { album in
+                    ResultRow(
+                        artwork: album.artworkURL, title: album.title,
+                        subtitle: [album.artists, album.year > 0 ? String(album.year) : ""]
+                            .filter { !$0.isEmpty }.joined(separator: " • "),
+                        destination: .deezerAlbum(album)
+                    )
+                }
+                ForEach(subsonicAlbums) { album in
+                    ResultRow(
+                        artwork: album.artworkURL, title: album.title,
+                        subtitle: [album.artists, album.year > 0 ? String(album.year) : ""]
+                            .filter { !$0.isEmpty }.joined(separator: " • "),
+                        destination: .subsonicAlbum(album)
+                    )
+                }
             case .artists:
                 ForEach(artists) { artist in
                     ResultRow(
@@ -120,11 +164,35 @@ struct SearchView: View {
                         destination: .artist(id: artist.id, name: artist.name), round: true
                     )
                 }
+                ForEach(deezerArtists) { artist in
+                    ResultRow(
+                        artwork: artist.artworkURL, title: artist.name, subtitle: "",
+                        destination: .deezerArtist(id: artist.id, name: artist.name), round: true
+                    )
+                }
+                ForEach(subsonicArtists) { artist in
+                    ResultRow(
+                        artwork: artist.artworkURL, title: artist.name, subtitle: "",
+                        destination: .subsonicArtist(id: artist.id, name: artist.name), round: true
+                    )
+                }
             case .playlists:
                 ForEach(playlists) { playlist in
                     ResultRow(
                         artwork: playlist.artworkURL, title: playlist.title, subtitle: playlist.owner,
                         destination: .playlist(playlist)
+                    )
+                }
+                ForEach(deezerPlaylists) { playlist in
+                    ResultRow(
+                        artwork: playlist.artworkURL, title: playlist.title, subtitle: playlist.owner,
+                        destination: .deezerPlaylist(playlist)
+                    )
+                }
+                ForEach(subsonicPlaylists) { playlist in
+                    ResultRow(
+                        artwork: playlist.artworkURL, title: playlist.title, subtitle: playlist.owner,
+                        destination: .subsonicPlaylist(playlist)
                     )
                 }
             }
@@ -154,30 +222,73 @@ struct SearchView: View {
         .padding(.bottom, 12)
     }
 
-    /// Searches YouTube Music once typing pauses, for the chosen kind of result. A failed search
-    /// shows a toast and keeps the local results.
+    /// Searches signed-in providers once typing pauses, for the chosen kind of result. A failed
+    /// search shows a toast and keeps the local results.
     private func searchRemote() async {
         let text = query.trimmingCharacters(in: .whitespaces)
-        guard youtube.isSignedIn, let client = youtube.client, !text.isEmpty else {
+        guard (youtube.client != nil || subsonic.client != nil || deezer.client != nil), !text.isEmpty else {
             songs = []; albums = []; artists = []; playlists = []
+            subsonicSongs = []; subsonicAlbums = []; subsonicArtists = []; subsonicPlaylists = []
+            deezerSongs = []; deezerAlbums = []; deezerArtists = []; deezerPlaylists = []
             return
         }
         try? await Task.sleep(for: .milliseconds(400))
         guard !Task.isCancelled else { return }
         isSearchingRemote = true
         defer { isSearchingRemote = false }
-        do {
-            switch scope {
-            case .songs: songs = try await client.searchSongs(text)
-            case .albums: albums = try await client.searchAlbums(text)
-            case .artists: artists = try await client.searchArtists(text)
-            case .playlists: playlists = try await client.searchPlaylists(text)
+
+        if let client = youtube.client {
+            do {
+                switch scope {
+                case .songs: songs = try await client.searchSongs(text)
+                case .albums: albums = try await client.searchAlbums(text)
+                case .artists: artists = try await client.searchArtists(text)
+                case .playlists: playlists = try await client.searchPlaylists(text)
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                toasts.post(Toast(.failed, String(localized: "YouTube Music search failed")).detail(error.localizedDescription))
             }
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled else { return }
-            toasts.post(Toast(.failed, String(localized: "YouTube Music search failed")).detail(error.localizedDescription))
+        } else {
+            songs = []; albums = []; artists = []; playlists = []
+        }
+
+        if let client = deezer.client {
+            do {
+                switch scope {
+                case .songs: deezerSongs = try await client.searchSongs(text)
+                case .albums: deezerAlbums = try await client.searchAlbums(text)
+                case .artists: deezerArtists = try await client.searchArtists(text)
+                case .playlists: deezerPlaylists = try await client.searchPlaylists(text)
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                toasts.post(Toast(.failed, String(localized: "Deezer search failed")).detail(error.localizedDescription))
+            }
+        } else {
+            deezerSongs = []; deezerAlbums = []; deezerArtists = []; deezerPlaylists = []
+        }
+
+        if let client = subsonic.client {
+            do {
+                switch scope {
+                case .songs: subsonicSongs = try await client.searchSongs(text)
+                case .albums: subsonicAlbums = try await client.searchAlbums(text)
+                case .artists: subsonicArtists = try await client.searchArtists(text)
+                case .playlists: subsonicPlaylists = try await client.searchPlaylists(text)
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                toasts.post(Toast(.failed, String(localized: "Subsonic search failed")).detail(error.localizedDescription))
+            }
+        } else {
+            subsonicSongs = []; subsonicAlbums = []; subsonicArtists = []; subsonicPlaylists = []
         }
     }
 

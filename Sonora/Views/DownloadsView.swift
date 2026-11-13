@@ -6,6 +6,8 @@ struct DownloadsView: View {
     @Environment(PlayHistory.self) private var history
     @Environment(PlaybackController.self) private var playback
     @Environment(YouTubeSession.self) private var youtube
+    @Environment(SubsonicSession.self) private var subsonic
+    @Environment(DeezerSession.self) private var deezer
     @State private var showsSmartSettings = false
 
     var body: some View {
@@ -21,14 +23,17 @@ struct DownloadsView: View {
                         Text(offline.isPaused ? "Paused" : "Downloading").font(.largeText)
                         Spacer()
                         Button {
-                            if offline.isPaused, let client = youtube.client { offline.resume(using: client) }
-                            else { offline.pause() }
+                            if offline.isPaused {
+                                offline.resume(using: youtube.client, subsonic: subsonic.client, deezer: deezer.client)
+                            } else {
+                                offline.pause()
+                            }
                         } label: {
                             Text(offline.isPaused ? "Resume" : "Pause").font(.bodyStrong)
                                 .frame(minWidth: 44, minHeight: 44)
                         }
                         .buttonStyle(.borderless)
-                        .disabled(offline.isPaused && youtube.client == nil)
+                        .disabled(offline.isPaused && youtube.client == nil && subsonic.client == nil && deezer.client == nil)
                     }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -110,11 +115,18 @@ struct DownloadsView: View {
             }
             .font(.small).tint(Theme.foreground)
             Button("Start downloads") {
-                guard let client = youtube.client else { return }
-                Task { await offline.startSmartDownloads(from: history.tracks, using: client) }
+                guard youtube.client != nil || subsonic.client != nil || deezer.client != nil else { return }
+                Task {
+                    await offline.startSmartDownloads(
+                        from: history.tracks,
+                        using: youtube.client,
+                        subsonic: subsonic.client,
+                        deezer: deezer.client
+                    )
+                }
             }
             .buttonStyle(PrimaryButtonStyle())
-            .disabled(!offline.smartDownloads || youtube.client == nil || offline.smartTracks(from: history.tracks).isEmpty)
+            .disabled(!offline.smartDownloads || (youtube.client == nil && subsonic.client == nil && deezer.client == nil) || offline.smartTracks(from: history.tracks).isEmpty)
             .padding(.top, 8)
         }
         .animation(Appearance.shared.animation(0.2), value: showsSmartSettings)
@@ -168,6 +180,8 @@ private struct DownloadJobRow: View {
 struct CollectionDownloadControl: View {
     @Environment(OfflineMusic.self) private var offline
     @Environment(YouTubeSession.self) private var youtube
+    @Environment(SubsonicSession.self) private var subsonic
+    @Environment(DeezerSession.self) private var deezer
     let tracks: [Track]
 
     private var saved: Int { tracks.filter { offline.localURL(for: $0) != nil }.count }
@@ -176,13 +190,13 @@ struct CollectionDownloadControl: View {
     var body: some View {
         HStack(spacing: 12) {
             Button {
-                guard let client = youtube.client else { return }
-                Task { await offline.download(tracks, using: client) }
+                guard youtube.client != nil || subsonic.client != nil || deezer.client != nil else { return }
+                Task { await offline.download(tracks, using: youtube.client, subsonic: subsonic.client, deezer: deezer.client) }
             } label: {
                 Label(saved == tracks.count ? "Downloaded" : queued ? "Queued" : "Download", systemImage: saved == tracks.count ? "checkmark.circle" : "arrow.down.circle")
                     .font(.bodyStrong).frame(minHeight: 44)
             }
-            .disabled(youtube.client == nil || queued || saved == tracks.count)
+            .disabled((youtube.client == nil && subsonic.client == nil && deezer.client == nil) || queued || saved == tracks.count)
             Spacer()
             NavigationLink {
                 DownloadsView().navigationTitle("Offline music")

@@ -2,6 +2,9 @@ import SwiftUI
 
 /// The page a `YouTubeDestination` opens.
 struct YouTubeDestinationView: View {
+    @Environment(YouTubeSession.self) private var youtube
+    @Environment(SubsonicSession.self) private var subsonic
+    @Environment(DeezerSession.self) private var deezer
     let destination: YouTubeDestination
 
     var body: some View {
@@ -13,14 +16,64 @@ struct YouTubeDestinationView: View {
                 title: playlist.title,
                 subtitle: playlist.owner,
                 artwork: playlist.artworkURL,
-                load: { client in try await client.playlistTracks(playlist.id) }
+                load: {
+                    guard let client = youtube.client else { throw YouTubeError.signedOut }
+                    return try await client.playlistTracks(playlist.id)
+                }
             )
         case .album(let album):
             YouTubeCollectionView(
                 title: album.title,
                 subtitle: album.artists,
                 artwork: album.artworkURL,
-                load: { client in try await client.albumTracks(album.id) }
+                load: {
+                    guard let client = youtube.client else { throw YouTubeError.signedOut }
+                    return try await client.albumTracks(album.id)
+                }
+            )
+        case .subsonicArtist(let id, let name):
+            SubsonicArtistView(id: id, name: name)
+        case .subsonicPlaylist(let playlist):
+            YouTubeCollectionView(
+                title: playlist.title,
+                subtitle: playlist.owner,
+                artwork: playlist.artworkURL,
+                load: {
+                    guard let client = subsonic.client else { throw SubsonicError.signedOut }
+                    return try await client.playlistTracks(playlist.id)
+                }
+            )
+        case .subsonicAlbum(let album):
+            YouTubeCollectionView(
+                title: album.title,
+                subtitle: album.artists,
+                artwork: album.artworkURL,
+                load: {
+                    guard let client = subsonic.client else { throw SubsonicError.signedOut }
+                    return try await client.albumTracks(album.id)
+                }
+            )
+        case .deezerArtist(let id, let name):
+            DeezerArtistView(id: id, name: name)
+        case .deezerPlaylist(let playlist):
+            YouTubeCollectionView(
+                title: playlist.title,
+                subtitle: playlist.owner,
+                artwork: playlist.artworkURL,
+                load: {
+                    guard let client = deezer.client else { throw DeezerError.signedOut }
+                    return try await client.playlistTracks(playlist.id)
+                }
+            )
+        case .deezerAlbum(let album):
+            YouTubeCollectionView(
+                title: album.title,
+                subtitle: album.artists,
+                artwork: album.artworkURL,
+                load: {
+                    guard let client = deezer.client else { throw DeezerError.signedOut }
+                    return try await client.albumTracks(album.id)
+                }
             )
         case .history:
             HistoryView()

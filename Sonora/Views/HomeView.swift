@@ -6,6 +6,10 @@ struct HomeView: View {
     @Environment(PlaybackController.self) private var playback
     @Environment(YouTubeSession.self) private var youtube
     @Environment(YouTubeFeed.self) private var feed
+    @Environment(SubsonicSession.self) private var subsonic
+    @Environment(SubsonicFeed.self) private var subsonicFeed
+    @Environment(DeezerSession.self) private var deezer
+    @Environment(DeezerFeed.self) private var deezerFeed
 
     @Environment(OfflineMusic.self) private var offline
     @Environment(PlayHistory.self) private var history
@@ -31,11 +35,11 @@ struct HomeView: View {
             }
             .accessibilityLabel("Offline music")
         } content: {
-            if library.tracks.isEmpty && youtube.isSignedIn == false && offline.tracks.isEmpty {
+            if library.tracks.isEmpty && !youtube.isSignedIn && !subsonic.isSignedIn && !deezer.isSignedIn && offline.tracks.isEmpty {
                 Vacancy(
                     icon: "music",
                     title: "Your music, in one place",
-                    message: "Import songs from Files, or sign in to YouTube Music in Settings."
+                    message: "Import songs from Files, or sign in to a music provider in Settings."
                 )
             } else {
                 ScrollView {
@@ -43,13 +47,24 @@ struct HomeView: View {
                         if youtube.isSignedIn {
                             youtubeContent
                         }
+                        if deezer.isSignedIn {
+                            deezerContent
+                        }
+                        if subsonic.isSignedIn {
+                            subsonicContent
+                        }
                         if !library.tracks.isEmpty {
                             localContent
                         }
                     }
                     .padding(.bottom, 16)
                 }
-                .refreshable { await feed.refresh(using: youtube.client) }
+                .refreshable {
+                    async let yt: Void = feed.refresh(using: youtube.client)
+                    async let dz: Void = deezerFeed.refresh(using: deezer.client)
+                    async let sub: Void = subsonicFeed.refresh(using: subsonic.client)
+                    _ = await (yt, dz, sub)
+                }
             }
         }
     }
@@ -90,6 +105,81 @@ struct HomeView: View {
             VStack(spacing: 12) {
                 Text(failure).font(.small).foregroundStyle(Theme.mutedForeground)
                 Button("Try again") { Task { await feed.refresh(using: youtube.client) } }
+                    .buttonStyle(GhostButtonStyle())
+            }
+            .padding(.horizontal, Theme.inset)
+        }
+    }
+
+    @ViewBuilder
+    private var subsonicContent: some View {
+        if let home = subsonicFeed.home {
+            if !home.quickPicks.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(youtube.isSignedIn ? "Subsonic quick picks" : "Quick picks")
+                        .font(.largeText)
+                        .foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, Theme.inset)
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(home.quickPicks.prefix(6)) { track in
+                            QuickPick(track: track) {
+                                playback.play(track, from: home.quickPicks)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, Theme.inset)
+                }
+            }
+            ForEach(home.shelves) { shelf in
+                YouTubeShelfView(title: shelf.title, items: shelf.items)
+            }
+        }
+        if subsonicFeed.isLoading {
+            ProgressView().tint(Theme.mutedForeground).frame(maxWidth: .infinity).padding(.vertical, 16)
+        }
+        if let failure = subsonicFeed.failure {
+            VStack(spacing: 12) {
+                Text(failure).font(.small).foregroundStyle(Theme.mutedForeground)
+                Button("Try again") { Task { await subsonicFeed.refresh(using: subsonic.client) } }
+                    .buttonStyle(GhostButtonStyle())
+            }
+            .padding(.horizontal, Theme.inset)
+        }
+    }
+
+    @ViewBuilder
+    private var deezerContent: some View {
+        if !youtube.isSignedIn, !recent.isEmpty {
+            YouTubeShelfView(title: String(localized: "Listen again"), items: recent)
+        }
+        if let home = deezerFeed.home {
+            if !home.quickPicks.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(youtube.isSignedIn ? "Deezer quick picks" : "Quick picks")
+                        .font(.largeText)
+                        .foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, Theme.inset)
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(home.quickPicks.prefix(6)) { track in
+                            QuickPick(track: track) {
+                                playback.play(track, from: home.quickPicks)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, Theme.inset)
+                }
+            }
+            ForEach(home.shelves) { shelf in
+                YouTubeShelfView(title: shelf.title, items: shelf.items)
+            }
+        }
+        if deezerFeed.isLoading {
+            ProgressView().tint(Theme.mutedForeground).frame(maxWidth: .infinity).padding(.vertical, 16)
+        }
+        if let failure = deezerFeed.failure {
+            VStack(spacing: 12) {
+                Text(failure).font(.small).foregroundStyle(Theme.mutedForeground)
+                Button("Try again") { Task { await deezerFeed.refresh(using: deezer.client) } }
                     .buttonStyle(GhostButtonStyle())
             }
             .padding(.horizontal, Theme.inset)

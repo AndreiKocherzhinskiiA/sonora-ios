@@ -70,33 +70,65 @@ private struct TabStrip: View {
 
 private struct GeneralSettings: View {
     @Environment(YouTubeSession.self) private var youtube
+    @Environment(SubsonicSession.self) private var subsonic
+    @Environment(DeezerSession.self) private var deezer
     @Environment(Toasts.self) private var toasts
-    @State private var showsSignIn = false
+    @State private var showsYouTubeSignIn = false
+    @State private var showsSubsonicSignIn = false
+    @State private var showsDeezerSignIn = false
 
     var body: some View {
         SettingsGroup("Providers") {
             youtubeRow
-            ForEach(Array(providers.enumerated()), id: \.offset) { _, entry in
+            RowDivider()
+            deezerRow
+            RowDivider()
+            subsonicRow
+            ForEach(Array(upcomingProviders.enumerated()), id: \.offset) { _, entry in
                 RowDivider()
                 HStack(spacing: 10) {
                     Icon(entry.icon, size: 16).foregroundStyle(Theme.mutedForeground)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.name).font(.bodyText).foregroundStyle(Theme.foreground)
-                        Text("Native client required").font(.small).foregroundStyle(Theme.mutedForeground)
+                        Text(entry.name).font(.bodyText).foregroundStyle(Theme.foreground.opacity(0.65))
+                        Text(entry.detail).font(.small).foregroundStyle(Theme.mutedForeground)
                     }
                     Spacer()
+                    Text("Coming soon")
+                        .font(.tiny)
+                        .foregroundStyle(Theme.mutedForeground)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                                .fill(Theme.muted.opacity(0.6))
+                        )
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 52)
             }
         }
-        .sheet(isPresented: $showsSignIn) {
+        .sheet(isPresented: $showsYouTubeSignIn) {
             YouTubeSignInView { header in
                 do {
                     try youtube.signIn(cookies: header)
                     toasts.post(Toast(.done, String(localized: "Signed in to YouTube Music")))
                 } catch {
                     toasts.post(Toast(.failed, String(localized: "YouTube Music sign-in failed")).detail(error.localizedDescription))
+                }
+            }
+        }
+        .sheet(isPresented: $showsSubsonicSignIn) {
+            SubsonicSignInView {
+                toasts.post(Toast(.done, String(localized: "Connected to Subsonic")))
+            }
+        }
+        .sheet(isPresented: $showsDeezerSignIn) {
+            DeezerSignInView { arl in
+                do {
+                    try deezer.signIn(arlInput: arl)
+                    toasts.post(Toast(.done, String(localized: "Signed in to Deezer")))
+                } catch {
+                    toasts.post(Toast(.failed, String(localized: "Deezer sign-in failed")).detail(error.localizedDescription))
                 }
             }
         }
@@ -123,7 +155,7 @@ private struct GeneralSettings: View {
             Button(youtube.isSignedIn ? "Sign out" : "Sign in") {
                 switch youtube.isSignedIn {
                 case true: youtube.signOut()
-                case false: showsSignIn = true
+                case false: showsYouTubeSignIn = true
                 }
             }
             .buttonStyle(PrimaryButtonStyle())
@@ -132,11 +164,54 @@ private struct GeneralSettings: View {
         .frame(height: 52)
     }
 
-    private let providers: [(name: LocalizedStringKey, icon: String)] = [
-        ("Apple Music", "music"),
-        ("Spotify", "music"),
-        ("Deezer", "music"),
-        ("Subsonic / Navidrome", "disc-3"),
+    private var subsonicRow: some View {
+        HStack(spacing: 10) {
+            Icon("disc-3", size: 16).foregroundStyle(Theme.mutedForeground)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Subsonic / Navidrome").font(.bodyText).foregroundStyle(Theme.foreground)
+                Text(subsonic.isSignedIn ? (subsonic.serverDisplayName ?? String(localized: "Connected")) : String(localized: "Not signed in"))
+                    .font(.small)
+                    .foregroundStyle(Theme.mutedForeground)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(subsonic.isSignedIn ? "Sign out" : "Sign in") {
+                switch subsonic.isSignedIn {
+                case true: subsonic.signOut()
+                case false: showsSubsonicSignIn = true
+                }
+            }
+            .buttonStyle(PrimaryButtonStyle())
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 52)
+    }
+
+    private var deezerRow: some View {
+        HStack(spacing: 10) {
+            Icon("music", size: 16).foregroundStyle(Theme.mutedForeground)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Deezer").font(.bodyText).foregroundStyle(Theme.foreground)
+                Text(deezer.isSignedIn ? "Signed in" : "Not signed in")
+                    .font(.small)
+                    .foregroundStyle(Theme.mutedForeground)
+            }
+            Spacer()
+            Button(deezer.isSignedIn ? "Sign out" : "Sign in") {
+                switch deezer.isSignedIn {
+                case true: deezer.signOut()
+                case false: showsDeezerSignIn = true
+                }
+            }
+            .buttonStyle(PrimaryButtonStyle())
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 52)
+    }
+
+    private let upcomingProviders: [(name: LocalizedStringKey, detail: LocalizedStringKey, icon: String)] = [
+        ("Apple Music", "Requires MusicKit entitlement", "music"),
+        ("Spotify", "Requires native Spotify client", "music"),
     ]
 }
 
