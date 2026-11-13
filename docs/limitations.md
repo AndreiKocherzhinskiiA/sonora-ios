@@ -4,7 +4,7 @@ An early-stage native iPhone adaptation, not desktop feature parity or an offici
 
 ## Implemented paths
 
-Local imports/playback; background and system controls; compact/full-screen player; queue actions/reordering; Home/search/library collections; artist pages; local history; radio; supported YouTube like/playlist actions; synced/plain lyrics; persistent downloads; configurable smart selection; appearance preferences.
+Local imports/playback; background and system controls; compact/full-screen player; queue actions/reordering; Home/search/library collections; artist pages; local history; radio; supported YouTube like/playlist actions; Deezer sign-in (WebKit or `arl` token), browsing, search, Blowfish-CBC stream decryption, radio, favorite/playlist actions, and downloads; Subsonic / Navidrome server sign-in, browsing, search, streaming, and downloads; synced/plain lyrics; persistent downloads; configurable smart selection; appearance preferences.
 
 Implementation does not imply exhaustive account, region, device, or OS coverage. See [validation](testing.md).
 
@@ -26,9 +26,9 @@ Source-code licensing does not grant rights to music, artwork, provider accounts
 
 ## Not implemented
 
-Apple Music, Spotify, Deezer, and Subsonic/Navidrome clients; signed-in-only YouTube stream resolution; gapless playback; EQ; crossfade; sleep timer; scrobbling; full playlist creation/editing; cloud sync.
+Apple Music and Spotify clients; signed-in-only YouTube stream resolution; gapless playback; EQ; crossfade; sleep timer; scrobbling; full playlist creation/editing; cloud sync.
 
-Other provider names in Settings are placeholders. No app backend, committed automated iOS test target, or CI workflow is declared here.
+Apple Music and Spotify appear in Settings as coming-soon placeholders (requiring paid MusicKit App ID entitlements or `librespot` / native Spotify SDK integration). Tidal is not part of desktop Sonora or Sonora for iPhone. No app backend, committed automated iOS test target, or CI workflow is declared here.
 
 ## Compatibility
 
